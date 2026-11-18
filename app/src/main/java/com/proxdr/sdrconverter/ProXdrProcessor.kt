@@ -1,10 +1,8 @@
 package com.proxdr.sdrconverter
 
 import android.graphics.Bitmap
-import android.graphics.Color
 import android.graphics.Gainmap
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.pow
 
 object ProXdrProcessor {
@@ -15,16 +13,10 @@ object ProXdrProcessor {
         val sCurveContrast: Float  // 0.0 to 1.0
     )
 
-    /**
-     * Extracts the base SDR bitmap and optional Android 14+ Gainmap (ProXDR / Ultra HDR),
-     * then fuses the gainmap highlights into the 8-bit SDR dynamic range while deepening shadows
-     * and applying a filmic S-curve so bright spots pop and dark spots stay rich and dark.
-     */
     fun processToSdr(source: Bitmap, params: Params): Bitmap {
         val width = source.width
         val height = source.height
         val baseBitmap = source.copy(Bitmap.Config.ARGB_8888, true)
-        // Strip gainmap from output so WhatsApp doesn't misinterpret or flatten it
         baseBitmap.gainmap = null
 
         val gainmap: Gainmap? = source.gainmap
@@ -76,12 +68,10 @@ object ProXdrProcessor {
             // 2. Apply Gainmap / ProXDR Highlight Boost
             if (gmPixels != null) {
                 val gmColor = gmPixels[i]
-                // Single-channel or 3-channel gainmap normalized [0..1]
                 val gmR = ((gmColor shr 16) and 0xFF) / 255.0f
                 val gmG = ((gmColor shr 8) and 0xFF) / 255.0f
                 val gmB = (gmColor and 0xFF) / 255.0f
 
-                // Compute HDR multiplier from gainmap
                 val gainR = 1.0f + gmR * (maxBoostR - 1.0f) * hlStrength
                 val gainG = 1.0f + gmG * (maxBoostG - 1.0f) * hlStrength
                 val gainB = 1.0f + gmB * (maxBoostB - 1.0f) * hlStrength
@@ -90,7 +80,6 @@ object ProXdrProcessor {
                 gLin *= gainG
                 bLin *= gainB
             } else {
-                // Fallback luminance-based highlight lift if ProXDR gainmap was already stripped
                 val highlightMask = luma.pow(1.6f)
                 val boost = 1.0f + highlightMask * hlStrength * 0.85f
                 rLin *= boost
@@ -99,7 +88,6 @@ object ProXdrProcessor {
             }
 
             // 3. Darken Dark Spots (Shadow Toe Crush)
-            // Pulls down lifted grey shadows without clipping pure midtones
             if (shStrength > 0f) {
                 val shadowGamma = 1.0f + shStrength * 0.65f
                 val shadowFactor = (1.0f - luma).coerceIn(0f, 1f).pow(1.5f)
@@ -109,7 +97,7 @@ object ProXdrProcessor {
                 bLin = bLin.coerceAtLeast(0f).pow(effectiveGamma)
             }
 
-            // 4. Soft-Knee Filmic Highlight Roll-Off (keeps boosted bright spots from harsh clipping)
+            // 4. Soft-Knee Filmic Highlight Roll-Off
             rLin = filmicToneMap(rLin)
             gLin = filmicToneMap(gLin)
             bLin = filmicToneMap(bLin)
@@ -126,7 +114,7 @@ object ProXdrProcessor {
                 b = applySCurve(b, contrastStrength)
             }
 
-            // 6. Subtle saturation compensation so tone-mapped highlights stay rich
+            // 6. Subtle saturation compensation
             val finalLuma = 0.299f * r + 0.587f * g + 0.114f * b
             val satBoost = 1.0f + (contrastStrength * 0.15f)
             r = (finalLuma + (r - finalLuma) * satBoost).coerceIn(0f, 1f)
@@ -145,14 +133,12 @@ object ProXdrProcessor {
     }
 
     private fun filmicToneMap(x: Float): Float {
-        // Compress values above 0.75 smoothly towards 1.0 while keeping bright punch
         if (x <= 0.75f) return x
         val excess = x - 0.75f
         return 0.75f + 0.25f * (excess / (excess + 0.35f))
     }
 
     private fun applySCurve(v: Float, amount: Float): Float {
-        // Smoothstep S-curve blend
         val s = v * v * (3.0f - 2.0f * v)
         return v + (s - v) * amount
     }

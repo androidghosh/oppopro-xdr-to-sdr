@@ -3,6 +3,7 @@ package com.proxdr.sdrconverter
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Gainmap
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Bundle
@@ -97,7 +98,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun getParams(): ProXdrProcessor.Params {
+    private fun readToneParams(): ProXdrProcessor.Params {
         return ProXdrProcessor.Params(
             highlightBoost = sliderHighlight.value / 100f,
             shadowCrush = sliderShadow.value / 100f,
@@ -128,9 +129,10 @@ class MainActivity : AppCompatActivity() {
                         pH,
                         true
                     )
-                    val newGm = android.graphics.Gainmap(scaledGmContents)
-                    newGm.ratioMax = gm.ratioMax
-                    newGm.ratioMin = gm.ratioMin
+                    val newGm = Gainmap(scaledGmContents).apply {
+                        ratioMax = gm.ratioMax
+                        ratioMin = gm.ratioMin
+                    }
                     scaled.gainmap = newGm
                 }
                 previewBaseBitmap = scaled
@@ -153,7 +155,7 @@ class MainActivity : AppCompatActivity() {
         renderJob?.cancel()
         renderJob = lifecycleScope.launch {
             delay(40)
-            val params = getParams()
+            val params = readToneParams()
             val processed = withContext(Dispatchers.Default) {
                 ProXdrProcessor.processToSdr(base, params)
             }
@@ -164,7 +166,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveFullResToGallery() {
         val full = originalFullBitmap ?: return
-        val params = getParams()
+        val params = readToneParams()
         btnSave.isEnabled = false
         statusText.text = "Processing full-resolution SDR image..."
 
@@ -195,14 +197,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun shareFullResToWhatsApp() {
         val full = originalFullBitmap ?: return
-        val params = getParams()
+        val params = readToneParams()
         btnShareWhatsApp.isEnabled = false
         statusText.text = "Preparing WhatsApp-optimized SDR image..."
 
         lifecycleScope.launch {
             val shareUri = withContext(Dispatchers.IO) {
                 val result = ProXdrProcessor.processToSdr(full, params)
-                // Downscale softly to 2560px max edge so WhatsApp Status doesn't muddy it
                 val maxEdge = maxOf(result.width, result.height)
                 val finalBmp = if (maxEdge > 2560) {
                     val s = 2560f / maxEdge
